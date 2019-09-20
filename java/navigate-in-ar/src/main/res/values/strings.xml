@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">Navigate in AR</string>
+    <string name="navigate_ar_permission_denied">Camera and read external storage permissions are both required for this app to run!</string>
+    <string name="service_loading_message">Preparing services...</string>
+    <string name="place_start_message">Tap to set a start point</string>
+    <string name="place_end_message">Tap to set a destination</string>
+    <string name="nav_ready_message">You\'re ready to start navigating!</string>
+    <string name="nav_button">Start AR</string>
+    <string name="calibration_start_message">Adjust calibration before starting</string>
+    <string name="solving_route_message">Solving route...</string>
+
+    <string name="intent_route_id">Route</string>
+
+    <string name="portal_url">https://www.arcgis.com/</string>
+    <string name="oauth_client_id">lgAdHkYZYlwwfAhC</string>
+    <string name="oauth_redirect_host">auth</string>
+    <string name="oauth_redirect_uri">authenticate-with-oauth</string>
+
+</resources>
