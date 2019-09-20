@@ -16,44 +16,83 @@
 
 package com.esri.arcgisruntime.navigateinar;
 
-import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import android.Manifest;
+import android.annotation.TargetApi;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.os.Bundle;
+import android.speech.tts.TextToSpeech;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
-import android.view.MotionEvent;
+import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
-import com.esri.arcgisruntime.concurrent.ListenableFuture;
-import com.esri.arcgisruntime.geometry.Envelope;
-import com.esri.arcgisruntime.geometry.GeodeticCurveType;
 import com.esri.arcgisruntime.geometry.GeometryEngine;
-import com.esri.arcgisruntime.geometry.LinearUnit;
-import com.esri.arcgisruntime.geometry.LinearUnitId;
 import com.esri.arcgisruntime.geometry.Point;
+import com.esri.arcgisruntime.geometry.Polyline;
+import com.esri.arcgisruntime.geometry.PolylineBuilder;
+import com.esri.arcgisruntime.location.AndroidLocationDataSource;
+import com.esri.arcgisruntime.location.LocationDataSource;
 import com.esri.arcgisruntime.mapping.ArcGISScene;
-import com.esri.arcgisruntime.mapping.view.Camera;
-import com.esri.arcgisruntime.mapping.view.DefaultSceneViewOnTouchListener;
+import com.esri.arcgisruntime.mapping.ArcGISTiledElevationSource;
+import com.esri.arcgisruntime.mapping.Basemap;
+import com.esri.arcgisruntime.mapping.NavigationConstraint;
+import com.esri.arcgisruntime.mapping.Surface;
+import com.esri.arcgisruntime.mapping.view.AtmosphereEffect;
+import com.esri.arcgisruntime.mapping.view.Graphic;
+import com.esri.arcgisruntime.mapping.view.GraphicsOverlay;
+import com.esri.arcgisruntime.mapping.view.LayerSceneProperties;
+import com.esri.arcgisruntime.mapping.view.SceneView;
+import com.esri.arcgisruntime.mapping.view.SpaceEffect;
+import com.esri.arcgisruntime.navigation.RouteTracker;
+import com.esri.arcgisruntime.symbology.GeometricEffect;
+import com.esri.arcgisruntime.symbology.MultilayerPolylineSymbol;
+import com.esri.arcgisruntime.symbology.SimpleRenderer;
+import com.esri.arcgisruntime.symbology.SolidStrokeSymbolLayer;
+import com.esri.arcgisruntime.symbology.StrokeSymbolLayer;
+import com.esri.arcgisruntime.symbology.SymbolLayer;
 import com.esri.arcgisruntime.tasks.networkanalysis.Route;
+import com.esri.arcgisruntime.tasks.networkanalysis.RouteParameters;
+import com.esri.arcgisruntime.tasks.networkanalysis.RouteResult;
+import com.esri.arcgisruntime.tasks.networkanalysis.RouteTask;
+import com.esri.arcgisruntime.toolkit.ar.ArLocationDataSource;
 import com.esri.arcgisruntime.toolkit.ar.ArcGISArView;
-import com.google.ar.core.HitResult;
-import com.google.ar.core.Plane;
 
-public class ARNavigateActivity extends AppCompatActivity {
+public class ARNavigateActivity extends AppCompatActivity implements TextToSpeech.OnInitListener {
 
   private static final String TAG = ARNavigateActivity.class.getSimpleName();
 
-  private boolean mHasConfiguredScene = false;
-
   private ArcGISArView mArView;
+  private TextView helpLabel;
+  private Button calibrationButton;
+  private Button navigateButton;
+
+  private TextToSpeech textToSpeech;
 
   // EEVVVIILLLL
   public static Route route;
+  public static RouteResult routeResult;
+  public static RouteParameters routeParameters;
+  public static RouteTask routeTask;
+
+  private RouteTracker routeTracker;
+
+  private AndroidLocationDataSource trackingLocationDataSource;
+
+  private GraphicsOverlay routeOverlay;
+  private ArcGISTiledElevationSource elevationSource;
+  private Surface elevationSurface;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -66,6 +105,29 @@ public class ARNavigateActivity extends AppCompatActivity {
     }
 
     setContentView(R.layout.activity_ar);
+
+    helpLabel = findViewById(R.id.helpLabel);
+    mArView = findViewById(R.id.arView);
+    calibrationButton = findViewById(R.id.calibrateButton);
+    navigateButton = findViewById(R.id.navigateStartButton);
+
+    mArView.setLocationDataSource(new ArLocationDataSource(this));
+
+    // Disable plane visualization - not useful for this scenario
+    mArView.getArSceneView().getPlaneRenderer().setEnabled(false);
+    mArView.getArSceneView().getPlaneRenderer().setVisible(false);
+
+    navigateButton.setOnClickListener(new View.OnClickListener() {
+      @Override
+      public void onClick(View v) {
+        startTurnByTurn();
+
+        if (routeTask.getRouteTaskInfo().isSupportsRerouting()){
+          routeTracker.enableReroutingAsync(routeTask, routeParameters, RouteTracker.ReroutingStrategy.TO_NEXT_STOP, true);
+        }
+      }
+    });
+
     requestPermissions();
   }
 
@@ -78,90 +140,137 @@ public class ARNavigateActivity extends AppCompatActivity {
     mArView = findViewById(R.id.arView);
     mArView.registerLifecycle(getLifecycle());
 
-    // use ArCore and tracking
-    mArView.setTracking(true);
-    // show planes identified by ArCore
-    mArView.getArSceneView().getPlaneRenderer().setEnabled(true);
-    mArView.getArSceneView().getPlaneRenderer().setVisible(true);
-
     // show simple instructions to the user. Refer to the README for more details
     Toast.makeText(this,
-        "Move the camera back and forth over a plane. When a plane is detected, tap on the plane to place a scene",
+        "Calibrate your heading before navigating!",
         Toast.LENGTH_LONG).show();
 
-    // on tap
-    mArView.getSceneView().setOnTouchListener(new DefaultSceneViewOnTouchListener(mArView.getSceneView()) {
-      @Override public boolean onSingleTapConfirmed(MotionEvent motionEvent) {
-        // get the hit results for the tap
-        List<HitResult> hitResults = mArView.getArSceneView().getArFrame().hitTest(motionEvent);
-        // check if the tapped point is recognized as a plane by ArCore
-        if (!hitResults.isEmpty() && hitResults.get(0).getTrackable() instanceof Plane) {
-          // get a reference to the tapped plane
-          Plane plane = (Plane) hitResults.get(0).getTrackable();
-          Toast.makeText(ARNavigateActivity.this, "Plane detected with a width of: " + plane.getExtentX(), Toast.LENGTH_SHORT)
-              .show();
+    configureRouteDisplay();
+  }
 
-          // get the tapped point as a graphics point
-          android.graphics.Point screenPoint = new android.graphics.Point(Math.round(motionEvent.getX()),
-              Math.round(motionEvent.getY()));
-          // if initial transformation set correctly
-          if (mArView.setInitialTransformationMatrix(screenPoint)) {
-            // the scene hasn't been configured
-            if (!mHasConfiguredScene) {
-              //loadSceneFromPackage(plane);
-            } else if (mArView.getSceneView().getScene() != null) {
-              // use information from the scene to determine the origin camera and translation factor
-              updateTranslationFactorAndOriginCamera(mArView.getSceneView().getScene(), plane);
-            }
-          }
-        } else {
-          String error = "ArCore doesn't recognize this point as a plane.";
-          Toast.makeText(ARNavigateActivity.this, error, Toast.LENGTH_SHORT).show();
-          Log.e(TAG, error);
+
+  private void configureRouteDisplay(){
+    SceneView sceneView = mArView.getSceneView();
+
+    ArcGISScene scene = new ArcGISScene(Basemap.createImageryWithLabels());
+    sceneView.setScene(scene);
+
+    elevationSource = new ArcGISTiledElevationSource(getString(R.string.elevation_url));
+    elevationSurface = new Surface();
+    elevationSurface.getElevationSources().add(elevationSource);
+
+    elevationSurface.setNavigationConstraint(NavigationConstraint.NONE);
+    sceneView.getScene().setBaseSurface(elevationSurface);
+
+    routeOverlay = new GraphicsOverlay();
+    sceneView.getGraphicsOverlays().add(routeOverlay);
+
+    routeOverlay.getSceneProperties().setSurfacePlacement(LayerSceneProperties.SurfacePlacement.ABSOLUTE);
+
+    SolidStrokeSymbolLayer strokeSymbolLayer = new SolidStrokeSymbolLayer(1, Color.YELLOW, new LinkedList<GeometricEffect>(), StrokeSymbolLayer.LineStyle3D.TUBE);
+    strokeSymbolLayer.setCapStyle(StrokeSymbolLayer.CapStyle.ROUND);
+    ArrayList<SymbolLayer> layers = new ArrayList<SymbolLayer>();
+    layers.add(strokeSymbolLayer);
+    MultilayerPolylineSymbol polylineSymbol = new MultilayerPolylineSymbol(layers);
+    SimpleRenderer polylineRenderer = new SimpleRenderer(polylineSymbol);
+    routeOverlay.setRenderer(polylineRenderer);
+
+    trackingLocationDataSource = new AndroidLocationDataSource(this);
+
+    trackingLocationDataSource.addLocationChangedListener(lce -> HandleUpdatedLocation(lce));
+
+    trackingLocationDataSource.startAsync();
+
+    sceneView.setSpaceEffect(SpaceEffect.TRANSPARENT);
+    sceneView.setAtmosphereEffect(AtmosphereEffect.NONE);
+
+    setRoute(routeResult.getRoutes().get(0));
+  }
+
+  private void setRoute(Route inputRoute){
+    route = inputRoute;
+    Polyline originalPolyline = route.getRouteGeometry();
+
+    // TODO - as written will this be subscribed multiple times?
+    // TODO - de-jank
+    elevationSource.addDoneLoadingListener(() -> {
+      routeOverlay.getGraphics().clear();
+
+      Polyline densifiedPolyline = (Polyline)GeometryEngine.densify(originalPolyline, 0.3);
+
+      Iterable<Point> allPoints = densifiedPolyline.getParts().getPartsAsPoints();
+
+      PolylineBuilder builder = new PolylineBuilder(densifiedPolyline.getSpatialReference());
+
+      // TODO - parallelize
+      int adjustedCount = 0;
+      int originalCount = 0;
+      for (Point originalPoint : allPoints){
+        originalCount++;
+        try {
+          double elevation = elevationSurface.getElevationAsync(originalPoint).get(10, TimeUnit.SECONDS);
+
+          Point newPoint = new Point(originalPoint.getX(), originalPoint.getY(), elevation + 3, originalPoint.getSpatialReference());
+
+          builder.addPoint(newPoint);
+          adjustedCount++;
+        } catch (ExecutionException | InterruptedException e) {
+          e.printStackTrace();
+        } catch (TimeoutException e) {
+          e.printStackTrace();
         }
-        return super.onSingleTapConfirmed(motionEvent);
       }
+
+      if (originalCount > adjustedCount){
+        Graphic routeGraphic = new Graphic(originalPolyline);
+        routeOverlay.getGraphics().add(routeGraphic);
+      } else {
+        Graphic routeGraphic = new Graphic(builder.toGeometry());
+        routeOverlay.getGraphics().add(routeGraphic);
+      }
+    });
+    elevationSource.retryLoadAsync();
+  }
+
+  private void HandleUpdatedLocation(LocationDataSource.LocationChangedEvent locationEvent){
+    if (routeTracker != null){
+      routeTracker.trackLocationAsync(locationEvent.getLocation());
+    }
+  }
+
+  private void startTurnByTurn(){
+    routeTracker = new RouteTracker(this, routeResult, 0);
+
+    textToSpeech = new TextToSpeech(this, this, "com.google.android.tts");
+
+    routeTracker.addNewVoiceGuidanceListener((RouteTracker.NewVoiceGuidanceEvent newVoiceGuidanceEvent) -> {
+      String newGuidance = newVoiceGuidanceEvent.getVoiceGuidance().getText();
+
+      helpLabel.setText(newGuidance);
+      speak(newGuidance);
+    });
+
+    routeTracker.addTrackingStatusChangedListener((RouteTracker.TrackingStatusChangedEvent trackingStatusChangedEvent) -> {
+      helpLabel.setText(routeTracker.generateVoiceGuidance().getText());
+    });
+
+    routeTracker.addRerouteCompletedListener((RouteTracker.RerouteCompletedEvent rerouteCompletedEvent) -> {
+      Route newRoute = rerouteCompletedEvent.getTrackingStatus().getRouteResult().getRoutes().get(0);
+
+      if (!newRoute.equals(route)){
+        setRoute(newRoute);
+      }
+    });
+
+    routeTracker.addRerouteStartedListener((RouteTracker.RerouteStartedEvent rerouteStartedEvent) -> {
+      helpLabel.setText(R.string.nav_rerouting_helptext);
     });
   }
 
-  /**
-   * Load the scene's first layer and calculate it'd geographical width. Use the scene's width and ArCore's assessment
-   * of the plane's width to set the AR view's translation transformation factor. Use the center of the scene, corrected
-   * for elevation, as the origin camera's look at point.
-   *
-   * @param scene to display
-   * @param plane detected by ArCore to which the scene should be pinned
-   */
-  private void updateTranslationFactorAndOriginCamera(ArcGISScene scene, Plane plane) {
-
-    // load the scene's first layer
-    scene.getOperationalLayers().get(0).loadAsync();
-    scene.getOperationalLayers().get(0).addDoneLoadingListener(() -> {
-      // get the scene extent
-      Envelope layerExtent = scene.getOperationalLayers().get(0).getFullExtent();
-      // calculate the width of the layer content in meters
-      double width = GeometryEngine
-          .lengthGeodetic(layerExtent, new LinearUnit(LinearUnitId.METERS), GeodeticCurveType.GEODESIC);
-
-      // set the translation factor based on scene content width and desired physical size
-      mArView.setTranslationFactor(width / plane.getExtentX());
-
-      // find the center point of the scene content
-      Point centerPoint = layerExtent.getCenter();
-
-      // find the altitude of the surface at the center
-      ListenableFuture<Double> elevationFuture = mArView.getSceneView().getScene().getBaseSurface()
-          .getElevationAsync(centerPoint);
-      elevationFuture.addDoneListener(() -> {
-        try {
-          double elevation = elevationFuture.get();
-          // create a new origin camera looking at the bottom center of the scene
-          mArView.setOriginCamera(new Camera(new Point(centerPoint.getX(), centerPoint.getY(), elevation), 0, 90, 0));
-        } catch (Exception e) {
-          Log.e(TAG, "Error getting elevation at point: " + e.getMessage());
-        }
-      });
-    });
+  @TargetApi(21)
+  private void speak(String utterance){
+    textToSpeech.stop();
+    textToSpeech.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, null);
   }
 
   /**
@@ -195,7 +304,6 @@ public class ARNavigateActivity extends AppCompatActivity {
 
   @Override
   protected void onPause() {
-    mArView.getSceneView().pause();
     mArView.stopTracking();
     super.onPause();
   }
@@ -203,13 +311,17 @@ public class ARNavigateActivity extends AppCompatActivity {
   @Override
   protected void onResume() {
     super.onResume();
-    mArView.startTracking(ArcGISArView.ARLocationTrackingMode.IGNORE);
-    mArView.getSceneView().resume();
+    mArView.startTracking(ArcGISArView.ARLocationTrackingMode.CONTINUOUS);
   }
 
   @Override
   protected void onDestroy() {
     mArView.stopTracking();
     super.onDestroy();
+  }
+
+  @Override
+  public void onInit(int status) {
+    // Had to put this here because of the voice guidance text-to-speech
   }
 }

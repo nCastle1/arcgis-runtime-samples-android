@@ -87,6 +87,8 @@ public class RoutePlanActivity extends AppCompatActivity {
 
     private RouteTask routeTask;
     private Route route;
+    private RouteResult routeResult;
+    private RouteParameters routeParameters;
 
     private String[] reqPermissions = new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission
             .ACCESS_COARSE_LOCATION};
@@ -159,6 +161,7 @@ public class RoutePlanActivity extends AppCompatActivity {
     private void enableTapToPlace(){
         mapview.setOnTouchListener(new DefaultMapViewOnTouchListener(this, mapview) {
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
+                if (e == null) { return true; }
                 if (startPoint == null){
                     // Add start point
                     startPoint = mapview
@@ -188,6 +191,9 @@ public class RoutePlanActivity extends AppCompatActivity {
         navigateButton.setOnClickListener(v -> {
             // TODO - this seems bad, but route doesn't implement serializable so..
             ARNavigateActivity.route = route;
+            ARNavigateActivity.routeParameters = routeParameters;
+            ARNavigateActivity.routeResult = routeResult;
+            ARNavigateActivity.routeTask = routeTask;
             // Pass route to activity and navigate
             Intent myIntent = new Intent(RoutePlanActivity.this, ARNavigateActivity.class);
             Bundle bundle = new Bundle();
@@ -233,12 +239,12 @@ public class RoutePlanActivity extends AppCompatActivity {
         listenableFuture.addDoneListener(() -> {
             try {
                 if (listenableFuture.isDone()) {
-                    RouteParameters routeParams = listenableFuture.get();
+                    routeParameters = listenableFuture.get();
 
                     // Parameters needed for navigation (happens in ARNavigate)
-                    routeParams.setReturnStops(true);
-                    routeParams.setReturnDirections(true);
-                    routeParams.setReturnRoutes(true);
+                    routeParameters.setReturnStops(true);
+                    routeParameters.setReturnDirections(true);
+                    routeParameters.setReturnRoutes(true);
 
                     // this scenario is intended for directions while walking
                     List<TravelMode> travelModes = routeTask.getRouteTaskInfo().getTravelModes();
@@ -252,7 +258,7 @@ public class RoutePlanActivity extends AppCompatActivity {
                         }
                     }
 
-                    routeParams.setTravelMode(walkingMode);
+                    routeParameters.setTravelMode(walkingMode);
 
                     // create stops
                     Stop stop1 = new Stop(startPoint);
@@ -262,14 +268,14 @@ public class RoutePlanActivity extends AppCompatActivity {
                     // add stops
                     routeStops.add(stop1);
                     routeStops.add(stop2);
-                    routeParams.setStops(routeStops);
+                    routeParameters.setStops(routeStops);
 
                     // set return directions as true to return turn-by-turn directions in the result of
-                    routeParams.setReturnDirections(true);
+                    routeParameters.setReturnDirections(true);
 
                     // solve
-                    RouteResult result = routeTask.solveRouteAsync(routeParams).get();
-                    final List routes = result.getRoutes();
+                    routeResult = routeTask.solveRouteAsync(routeParameters).get();
+                    final List routes = routeResult.getRoutes();
                     route = (Route) routes.get(0);
                     // create a mRouteSymbol graphic
                     Graphic routeGraphic = new Graphic(route.getRouteGeometry());
