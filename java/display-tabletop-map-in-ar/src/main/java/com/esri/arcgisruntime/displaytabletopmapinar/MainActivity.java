@@ -228,18 +228,21 @@ public class MainActivity extends AppCompatActivity {
   @Override
   protected void onPause() {
     mArView.getSceneView().pause();
+    mArView.stopTracking();
     super.onPause();
   }
 
   @Override
   protected void onResume() {
     super.onResume();
+    mArView.startTracking(ArcGISArView.ARLocationTrackingMode.IGNORE);
     mArView.getSceneView().resume();
   }
 
   @Override
   protected void onDestroy() {
     mArView.getSceneView().dispose();
+    mArView.stopTracking();
     super.onDestroy();
   }
 }
