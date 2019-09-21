@@ -31,8 +31,7 @@ public class MSLAdjustedARLocationDataSource extends LocationDataSource {
     public enum AltitudeAdjustmentMode {
         GPS_RAW_ELLIPSOID,
         NMEA_PARSED_MSL, // listen for NMEA messages and extract altitude that way
-        LOCALLY_ADJUSTED_WITH_EGM2008,
-        MANUAL_OFFSET
+        LOCALLY_ADJUSTED_WITH_EGM2008
     }
 
     public MSLAdjustedARLocationDataSource(Context context){
@@ -454,16 +453,14 @@ public class MSLAdjustedARLocationDataSource extends LocationDataSource {
 
     private double getOffsetAltitude(double longitude, double latitude, double altitude){
         switch (getAltitudeAdjustmentMode()){
-            case MANUAL_OFFSET:
-                return altitude + getManualOffset();
             case NMEA_PARSED_MSL:
                 if (lastNmeaUpdateTimestamp > 0 && lastNmeaHeight != Double.NaN){
-                    return lastNmeaHeight;
+                    return lastNmeaHeight + getManualOffset();
                 } else {
-                    return altitude;
+                    return altitude + getManualOffset();
                 }
             case GPS_RAW_ELLIPSOID:
-                return altitude;
+                return altitude + getManualOffset();
             case LOCALLY_ADJUSTED_WITH_EGM2008:
                 throw new IllegalStateException("Geoid adjustment not implemented");
         }

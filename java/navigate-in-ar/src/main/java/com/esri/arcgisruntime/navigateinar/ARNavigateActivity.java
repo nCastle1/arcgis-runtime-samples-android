@@ -50,6 +50,7 @@ import com.esri.arcgisruntime.mapping.Basemap;
 import com.esri.arcgisruntime.mapping.NavigationConstraint;
 import com.esri.arcgisruntime.mapping.Surface;
 import com.esri.arcgisruntime.mapping.view.AtmosphereEffect;
+import com.esri.arcgisruntime.mapping.view.Camera;
 import com.esri.arcgisruntime.mapping.view.Graphic;
 import com.esri.arcgisruntime.mapping.view.GraphicsOverlay;
 import com.esri.arcgisruntime.mapping.view.LayerSceneProperties;
@@ -66,265 +67,318 @@ import com.esri.arcgisruntime.tasks.networkanalysis.Route;
 import com.esri.arcgisruntime.tasks.networkanalysis.RouteParameters;
 import com.esri.arcgisruntime.tasks.networkanalysis.RouteResult;
 import com.esri.arcgisruntime.tasks.networkanalysis.RouteTask;
-import com.esri.arcgisruntime.toolkit.ar.ArLocationDataSource;
 import com.esri.arcgisruntime.toolkit.ar.ArcGISArView;
+import com.esri.arcgisruntime.toolkit.control.JoystickSeekBar;
 
 public class ARNavigateActivity extends AppCompatActivity implements TextToSpeech.OnInitListener {
 
-  private static final String TAG = ARNavigateActivity.class.getSimpleName();
+    private static final String TAG = ARNavigateActivity.class.getSimpleName();
 
-  private ArcGISArView mArView;
-  private TextView helpLabel;
-  private Button calibrationButton;
-  private Button navigateButton;
+    private ArcGISArView mArView;
+    private TextView helpLabel;
+    private Button calibrationButton;
+    private Button navigateButton;
+    private View calibrationView;
+    private JoystickSeekBar headingSlider;
+    private JoystickSeekBar altitudeSlider;
 
-  private TextToSpeech textToSpeech;
+    private TextToSpeech textToSpeech;
 
-  // EEVVVIILLLL
-  public static Route route;
-  public static RouteResult routeResult;
-  public static RouteParameters routeParameters;
-  public static RouteTask routeTask;
+    // TODO - don't pass data this way.
+    public static Route route;
+    public static RouteResult routeResult;
+    public static RouteParameters routeParameters;
+    public static RouteTask routeTask;
 
-  private RouteTracker routeTracker;
+    private RouteTracker routeTracker;
 
-  private AndroidLocationDataSource trackingLocationDataSource;
+    private AndroidLocationDataSource trackingLocationDataSource;
 
-  private GraphicsOverlay routeOverlay;
-  private ArcGISTiledElevationSource elevationSource;
-  private Surface elevationSurface;
+    private GraphicsOverlay routeOverlay;
+    private ArcGISTiledElevationSource elevationSource;
+    private Surface elevationSurface;
 
-  @Override
-  protected void onCreate(Bundle savedInstanceState) {
-    super.onCreate(savedInstanceState);
+    private ArcGISScene mScene;
 
-    if (route == null){
-      String error = "Route not set before launching activity";
-      Toast.makeText(ARNavigateActivity.this, error, Toast.LENGTH_SHORT).show();
-      Log.e(TAG, error);
-    }
+    private boolean isCalibrating = false;
+    private float altitudeOffsetValue = 0f;
 
-    setContentView(R.layout.activity_ar);
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
 
-    helpLabel = findViewById(R.id.helpLabel);
-    mArView = findViewById(R.id.arView);
-    calibrationButton = findViewById(R.id.calibrateButton);
-    navigateButton = findViewById(R.id.navigateStartButton);
-
-    MSLAdjustedARLocationDataSource arLocationDataSource = new MSLAdjustedARLocationDataSource(this);
-    arLocationDataSource.setAltitudeAdjustmentMode(MSLAdjustedARLocationDataSource.AltitudeAdjustmentMode.NMEA_PARSED_MSL);
-    mArView.setLocationDataSource(arLocationDataSource);
-    //mArView.setLocationDataSource(new ArLocationDataSource(this));
-
-    // Disable plane visualization - not useful for this scenario
-    mArView.getArSceneView().getPlaneRenderer().setEnabled(false);
-    mArView.getArSceneView().getPlaneRenderer().setVisible(false);
-
-    navigateButton.setOnClickListener(new View.OnClickListener() {
-      @Override
-      public void onClick(View v) {
-        startTurnByTurn();
-
-        if (routeTask.getRouteTaskInfo().isSupportsRerouting()){
-          routeTracker.enableReroutingAsync(routeTask, routeParameters, RouteTracker.ReroutingStrategy.TO_NEXT_STOP, true);
+        if (route == null) {
+            String error = "Route not set before launching activity";
+            Toast.makeText(ARNavigateActivity.this, error, Toast.LENGTH_SHORT).show();
+            Log.e(TAG, error);
         }
-      }
-    });
 
-    requestPermissions();
-  }
+        setContentView(R.layout.activity_ar);
 
-  /**
-   * Setup the Ar View to use ArCore and tracking. Also add a touch listener to the scene view which checks for single
-   * taps on a plane, as identified by ArCore. On tap, set the initial transformation matrix and load the scene.
-   */
-  private void setupArView() {
+        helpLabel = findViewById(R.id.helpLabel);
+        mArView = findViewById(R.id.arView);
+        calibrationButton = findViewById(R.id.calibrateButton);
+        navigateButton = findViewById(R.id.navigateStartButton);
+        calibrationView = findViewById(R.id.calibrationView);
+        headingSlider = findViewById(R.id.headingJoystick);
+        altitudeSlider = findViewById(R.id.altitudeJoystick);
 
-    mArView = findViewById(R.id.arView);
-    mArView.registerLifecycle(getLifecycle());
+        MSLAdjustedARLocationDataSource arLocationDataSource = new MSLAdjustedARLocationDataSource(this);
+        arLocationDataSource.setAltitudeAdjustmentMode(MSLAdjustedARLocationDataSource.AltitudeAdjustmentMode.NMEA_PARSED_MSL);
+        mArView.setLocationDataSource(arLocationDataSource);
+        //mArView.setLocationDataSource(new ArLocationDataSource(this));
 
-    // show simple instructions to the user. Refer to the README for more details
-    Toast.makeText(this,
-        "Calibrate your heading before navigating!",
-        Toast.LENGTH_LONG).show();
+        // Disable plane visualization - not useful for this scenario
+        mArView.getArSceneView().getPlaneRenderer().setEnabled(false);
+        mArView.getArSceneView().getPlaneRenderer().setVisible(false);
 
-    configureRouteDisplay();
-  }
+        navigateButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startTurnByTurn();
 
+                if (routeTask.getRouteTaskInfo().isSupportsRerouting()) {
+                    routeTracker.enableReroutingAsync(routeTask, routeParameters, RouteTracker.ReroutingStrategy.TO_NEXT_STOP, true);
+                }
+            }
+        });
 
-  private void configureRouteDisplay(){
-    SceneView sceneView = mArView.getSceneView();
+        calibrationButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                setIsCalibrating(!isCalibrating);
+            }
+        });
 
-    ArcGISScene scene = new ArcGISScene(Basemap.createImageryWithLabels());
-    sceneView.setScene(scene);
+        // Begin listening for delta progress updates on the heading control
+        headingSlider.addDeltaProgressUpdatedListener(new JoystickSeekBar.DeltaProgressUpdatedListener() {
+            @Override
+            public void onDeltaProgressUpdated(float delta) {
+                // Note: jsb_min and jsb_max must be set to ensure you get usable delta values
+                // Sample uses -10 and 10, set in activity_ar.xml
+                Camera camera = mArView.getOriginCamera();
+                double heading = camera.getHeading() + delta;
+                Camera newCam = camera.rotateTo(heading, camera.getPitch(), camera.getRoll());
+                mArView.setOriginCamera(newCam);
+            }
+        });
 
-    elevationSource = new ArcGISTiledElevationSource(getString(R.string.elevation_url));
-    elevationSurface = new Surface();
-    elevationSurface.getElevationSources().add(elevationSource);
+        // Begin listening for delta progress updates for altitude calibration
+        altitudeSlider.addDeltaProgressUpdatedListener(new JoystickSeekBar.DeltaProgressUpdatedListener() {
+            @Override
+            public void onDeltaProgressUpdated(float delta) {
+                // Note: jsb_min and jsb_max must be set to ensure you get usable delta values
+                // Sample uses -10 and 10, set in activity_ar.xml
+                altitudeOffsetValue += delta;
+                arLocationDataSource.setManualOffset(altitudeOffsetValue);
+            }
+        });
 
-    elevationSurface.setNavigationConstraint(NavigationConstraint.NONE);
-    sceneView.getScene().setBaseSurface(elevationSurface);
+        requestPermissions();
+    }
 
-    routeOverlay = new GraphicsOverlay();
-    sceneView.getGraphicsOverlays().add(routeOverlay);
+    /**
+     * Setup the Ar View to use ArCore and tracking. Also add a touch listener to the scene view which checks for single
+     * taps on a plane, as identified by ArCore. On tap, set the initial transformation matrix and load the scene.
+     */
+    private void setupArView() {
 
-    routeOverlay.getSceneProperties().setSurfacePlacement(LayerSceneProperties.SurfacePlacement.ABSOLUTE);
+        mArView = findViewById(R.id.arView);
+        mArView.registerLifecycle(getLifecycle());
 
-    SolidStrokeSymbolLayer strokeSymbolLayer = new SolidStrokeSymbolLayer(1, Color.YELLOW, new LinkedList<GeometricEffect>(), StrokeSymbolLayer.LineStyle3D.TUBE);
-    strokeSymbolLayer.setCapStyle(StrokeSymbolLayer.CapStyle.ROUND);
-    ArrayList<SymbolLayer> layers = new ArrayList<SymbolLayer>();
-    layers.add(strokeSymbolLayer);
-    MultilayerPolylineSymbol polylineSymbol = new MultilayerPolylineSymbol(layers);
-    SimpleRenderer polylineRenderer = new SimpleRenderer(polylineSymbol);
-    routeOverlay.setRenderer(polylineRenderer);
+        // show simple instructions to the user. Refer to the README for more details
+        Toast.makeText(this,
+                "Calibrate your heading before navigating!",
+                Toast.LENGTH_LONG).show();
 
-    trackingLocationDataSource = new AndroidLocationDataSource(this);
+        configureRouteDisplay();
+    }
 
-    trackingLocationDataSource.addLocationChangedListener(lce -> HandleUpdatedLocation(lce));
-
-    trackingLocationDataSource.startAsync();
-
-    sceneView.setSpaceEffect(SpaceEffect.TRANSPARENT);
-    sceneView.setAtmosphereEffect(AtmosphereEffect.NONE);
-
-    setRoute(routeResult.getRoutes().get(0));
-  }
-
-  private void setRoute(Route inputRoute){
-    route = inputRoute;
-    Polyline originalPolyline = route.getRouteGeometry();
-
-    // TODO - as written will this be subscribed multiple times?
-    // TODO - de-jank
-    elevationSource.addDoneLoadingListener(() -> {
-      routeOverlay.getGraphics().clear();
-
-      Polyline densifiedPolyline = (Polyline)GeometryEngine.densify(originalPolyline, 0.3);
-
-      Iterable<Point> allPoints = densifiedPolyline.getParts().getPartsAsPoints();
-
-      PolylineBuilder builder = new PolylineBuilder(densifiedPolyline.getSpatialReference());
-
-      // TODO - parallelize
-      int adjustedCount = 0;
-      int originalCount = 0;
-      for (Point originalPoint : allPoints){
-        originalCount++;
-        try {
-          double elevation = elevationSurface.getElevationAsync(originalPoint).get(10, TimeUnit.SECONDS);
-
-          Point newPoint = new Point(originalPoint.getX(), originalPoint.getY(), elevation + 3, originalPoint.getSpatialReference());
-
-          builder.addPoint(newPoint);
-          adjustedCount++;
-        } catch (ExecutionException | InterruptedException e) {
-          e.printStackTrace();
-        } catch (TimeoutException e) {
-          e.printStackTrace();
+    private void setIsCalibrating(boolean isCalibrating) {
+        this.isCalibrating = isCalibrating;
+        if (isCalibrating == true) {
+            mScene.getBaseSurface().setOpacity(0.5f);
+            calibrationView.setVisibility(View.VISIBLE);
+        } else {
+            mScene.getBaseSurface().setOpacity(0f);
+            calibrationView.setVisibility(View.GONE);
         }
-      }
-
-      if (originalCount > adjustedCount){
-        Graphic routeGraphic = new Graphic(originalPolyline);
-        routeOverlay.getGraphics().add(routeGraphic);
-      } else {
-        Graphic routeGraphic = new Graphic(builder.toGeometry());
-        routeOverlay.getGraphics().add(routeGraphic);
-      }
-    });
-    elevationSource.retryLoadAsync();
-  }
-
-  private void HandleUpdatedLocation(LocationDataSource.LocationChangedEvent locationEvent){
-    if (routeTracker != null){
-      routeTracker.trackLocationAsync(locationEvent.getLocation());
     }
-  }
 
-  private void startTurnByTurn(){
-    routeTracker = new RouteTracker(this, routeResult, 0);
+    private void configureRouteDisplay() {
+        SceneView sceneView = mArView.getSceneView();
 
-    textToSpeech = new TextToSpeech(this, this, "com.google.android.tts");
+        mScene = new ArcGISScene(Basemap.createImageryWithLabels());
+        sceneView.setScene(mScene);
 
-    routeTracker.addNewVoiceGuidanceListener((RouteTracker.NewVoiceGuidanceEvent newVoiceGuidanceEvent) -> {
-      String newGuidance = newVoiceGuidanceEvent.getVoiceGuidance().getText();
+        elevationSource = new ArcGISTiledElevationSource(getString(R.string.elevation_url));
+        elevationSurface = new Surface();
+        elevationSurface.getElevationSources().add(elevationSource);
 
-      helpLabel.setText(newGuidance);
-      speak(newGuidance);
-    });
+        elevationSurface.setNavigationConstraint(NavigationConstraint.NONE);
+        elevationSurface.setOpacity(0f);
+        sceneView.getScene().setBaseSurface(elevationSurface);
 
-    routeTracker.addTrackingStatusChangedListener((RouteTracker.TrackingStatusChangedEvent trackingStatusChangedEvent) -> {
-      helpLabel.setText(routeTracker.generateVoiceGuidance().getText());
-    });
+        routeOverlay = new GraphicsOverlay();
+        sceneView.getGraphicsOverlays().add(routeOverlay);
 
-    routeTracker.addRerouteCompletedListener((RouteTracker.RerouteCompletedEvent rerouteCompletedEvent) -> {
-      Route newRoute = rerouteCompletedEvent.getTrackingStatus().getRouteResult().getRoutes().get(0);
+        routeOverlay.getSceneProperties().setSurfacePlacement(LayerSceneProperties.SurfacePlacement.ABSOLUTE);
 
-      if (!newRoute.equals(route)){
-        setRoute(newRoute);
-      }
-    });
+        SolidStrokeSymbolLayer strokeSymbolLayer = new SolidStrokeSymbolLayer(1, Color.YELLOW, new LinkedList<GeometricEffect>(), StrokeSymbolLayer.LineStyle3D.TUBE);
+        strokeSymbolLayer.setCapStyle(StrokeSymbolLayer.CapStyle.ROUND);
+        ArrayList<SymbolLayer> layers = new ArrayList<SymbolLayer>();
+        layers.add(strokeSymbolLayer);
+        MultilayerPolylineSymbol polylineSymbol = new MultilayerPolylineSymbol(layers);
+        SimpleRenderer polylineRenderer = new SimpleRenderer(polylineSymbol);
+        routeOverlay.setRenderer(polylineRenderer);
 
-    routeTracker.addRerouteStartedListener((RouteTracker.RerouteStartedEvent rerouteStartedEvent) -> {
-      helpLabel.setText(R.string.nav_rerouting_helptext);
-    });
-  }
+        trackingLocationDataSource = new AndroidLocationDataSource(this);
 
-  @TargetApi(21)
-  private void speak(String utterance){
-    textToSpeech.stop();
-    textToSpeech.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, null);
-  }
+        trackingLocationDataSource.addLocationChangedListener(lce -> HandleUpdatedLocation(lce));
 
-  /**
-   * Request read external storage for API level 23+.
-   */
-  private void requestPermissions() {
-    // define permission to request
-    String[] reqPermission = { Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.CAMERA };
-    int requestCode = 2;
-    if (ContextCompat.checkSelfPermission(this, reqPermission[0]) == PackageManager.PERMISSION_GRANTED) {
-      setupArView();
-    } else {
-      // request permission
-      ActivityCompat.requestPermissions(this, reqPermission, requestCode);
+        trackingLocationDataSource.startAsync();
+
+        sceneView.setSpaceEffect(SpaceEffect.TRANSPARENT);
+        sceneView.setAtmosphereEffect(AtmosphereEffect.NONE);
+
+        setRoute(routeResult.getRoutes().get(0));
     }
-  }
 
-  /**
-   * Handle the permissions request response.
-   */
-  @Override
-  public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-    if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-      setupArView();
-    } else {
-      // report to user that permission was denied
-      Toast.makeText(this, getString(R.string.navigate_ar_permission_denied), Toast.LENGTH_SHORT).show();
+    private void setRoute(Route inputRoute) {
+        route = inputRoute;
+        Polyline originalPolyline = route.getRouteGeometry();
+
+        // TODO - as written will this be subscribed multiple times?
+        // TODO - de-jank
+        elevationSource.addDoneLoadingListener(() -> {
+            routeOverlay.getGraphics().clear();
+
+            Polyline densifiedPolyline = (Polyline) GeometryEngine.densify(originalPolyline, 0.3);
+
+            Iterable<Point> allPoints = densifiedPolyline.getParts().getPartsAsPoints();
+
+            PolylineBuilder builder = new PolylineBuilder(densifiedPolyline.getSpatialReference());
+
+            // TODO - parallelize
+            int adjustedCount = 0;
+            int originalCount = 0;
+            for (Point originalPoint : allPoints) {
+                originalCount++;
+                try {
+                    double elevation = elevationSurface.getElevationAsync(originalPoint).get(10, TimeUnit.SECONDS);
+
+                    Point newPoint = new Point(originalPoint.getX(), originalPoint.getY(), elevation + 3, originalPoint.getSpatialReference());
+
+                    builder.addPoint(newPoint);
+                    adjustedCount++;
+                } catch (ExecutionException | InterruptedException e) {
+                    e.printStackTrace();
+                } catch (TimeoutException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            if (originalCount > adjustedCount) {
+                Graphic routeGraphic = new Graphic(originalPolyline);
+                routeOverlay.getGraphics().add(routeGraphic);
+            } else {
+                Graphic routeGraphic = new Graphic(builder.toGeometry());
+                routeOverlay.getGraphics().add(routeGraphic);
+            }
+        });
+        elevationSource.retryLoadAsync();
     }
-    super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-  }
 
-  @Override
-  protected void onPause() {
-    mArView.stopTracking();
-    super.onPause();
-  }
+    private void HandleUpdatedLocation(LocationDataSource.LocationChangedEvent locationEvent) {
+        if (routeTracker != null) {
+            routeTracker.trackLocationAsync(locationEvent.getLocation());
+        }
+    }
 
-  @Override
-  protected void onResume() {
-    super.onResume();
-    mArView.startTracking(ArcGISArView.ARLocationTrackingMode.CONTINUOUS);
-  }
+    private void startTurnByTurn() {
+        routeTracker = new RouteTracker(this, routeResult, 0);
 
-  @Override
-  protected void onDestroy() {
-    mArView.stopTracking();
-    super.onDestroy();
-  }
+        textToSpeech = new TextToSpeech(this, this, "com.google.android.tts");
 
-  @Override
-  public void onInit(int status) {
-    // Had to put this here because of the voice guidance text-to-speech
-  }
+        routeTracker.addNewVoiceGuidanceListener((RouteTracker.NewVoiceGuidanceEvent newVoiceGuidanceEvent) -> {
+            String newGuidance = newVoiceGuidanceEvent.getVoiceGuidance().getText();
+
+            helpLabel.setText(newGuidance);
+            speak(newGuidance);
+        });
+
+        routeTracker.addTrackingStatusChangedListener((RouteTracker.TrackingStatusChangedEvent trackingStatusChangedEvent) -> {
+            helpLabel.setText(routeTracker.generateVoiceGuidance().getText());
+        });
+
+        routeTracker.addRerouteCompletedListener((RouteTracker.RerouteCompletedEvent rerouteCompletedEvent) -> {
+            Route newRoute = rerouteCompletedEvent.getTrackingStatus().getRouteResult().getRoutes().get(0);
+
+            if (!newRoute.equals(route)) {
+                setRoute(newRoute);
+            }
+        });
+
+        routeTracker.addRerouteStartedListener((RouteTracker.RerouteStartedEvent rerouteStartedEvent) -> {
+            helpLabel.setText(R.string.nav_rerouting_helptext);
+        });
+    }
+
+    @TargetApi(21)
+    private void speak(String utterance) {
+        textToSpeech.stop();
+        textToSpeech.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, null);
+    }
+
+    /**
+     * Request read external storage for API level 23+.
+     */
+    private void requestPermissions() {
+        // define permission to request
+        String[] reqPermission = {Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.CAMERA};
+        int requestCode = 2;
+        if (ContextCompat.checkSelfPermission(this, reqPermission[0]) == PackageManager.PERMISSION_GRANTED) {
+            setupArView();
+        } else {
+            // request permission
+            ActivityCompat.requestPermissions(this, reqPermission, requestCode);
+        }
+    }
+
+    /**
+     * Handle the permissions request response.
+     */
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            setupArView();
+        } else {
+            // report to user that permission was denied
+            Toast.makeText(this, getString(R.string.navigate_ar_permission_denied), Toast.LENGTH_SHORT).show();
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    @Override
+    protected void onPause() {
+        mArView.stopTracking();
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        mArView.startTracking(ArcGISArView.ARLocationTrackingMode.CONTINUOUS);
+    }
+
+    @Override
+    protected void onDestroy() {
+        mArView.stopTracking();
+        super.onDestroy();
+    }
+
+    @Override
+    public void onInit(int status) {
+        // Had to put this here because of the voice guidance text-to-speech
+    }
 }
