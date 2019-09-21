@@ -111,7 +111,10 @@ public class ARNavigateActivity extends AppCompatActivity implements TextToSpeec
     calibrationButton = findViewById(R.id.calibrateButton);
     navigateButton = findViewById(R.id.navigateStartButton);
 
-    mArView.setLocationDataSource(new ArLocationDataSource(this));
+    MSLAdjustedARLocationDataSource arLocationDataSource = new MSLAdjustedARLocationDataSource(this);
+    arLocationDataSource.setAltitudeAdjustmentMode(MSLAdjustedARLocationDataSource.AltitudeAdjustmentMode.NMEA_PARSED_MSL);
+    mArView.setLocationDataSource(arLocationDataSource);
+    //mArView.setLocationDataSource(new ArLocationDataSource(this));
 
     // Disable plane visualization - not useful for this scenario
     mArView.getArSceneView().getPlaneRenderer().setEnabled(false);
