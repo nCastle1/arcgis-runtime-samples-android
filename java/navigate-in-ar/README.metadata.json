@@ -1,0 +1,34 @@
+{
+    "category": "Augmented Reality",
+    "description": "Use a route displayed in the real world to navigate.",
+    "ignore": false,
+    "images": [
+        "navigate-in-ar.png"
+    ],
+    "keywords": [
+        "Augmented reality",
+        "directions",
+        "full-scale",
+        "guidance",
+        "mixed reality",
+	    "navigate",
+	    "navigation",
+	    "real-scale",
+        "route",
+        "routing",
+        "world-scale"
+    ],
+    "redirect_from": "",
+    "relevant_apis": [
+        "ArcGISARView",
+        "ArcGISARView.setOriginCamera(...)",
+        "ArcGISARView.setInitialTransformation(...)",
+        "ArcGISARView.setTranslationFactor(...)",
+	    "Surface.setNavigationConstraint(...)",
+	    "Surface.setOpacity(...)"
+    ],
+    "snippets": [
+        "src/main/java/com/esri/arcgisruntime/navigateinar/MainActivity.java"
+    ],
+    "title": "Navigate in AR"
+}
