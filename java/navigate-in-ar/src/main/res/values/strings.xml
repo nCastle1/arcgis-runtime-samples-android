@@ -22,4 +22,7 @@
     <string name="oauth_redirect_host">auth</string>
     <string name="oauth_redirect_uri">authenticate-with-oauth</string>
 
+    <string name="location_failed_error_message">Failed to start location service</string>
+    <string name="route_failed_error_message">Failed to connect to route service</string>
+
 </resources>
